@@ -1,0 +1,30 @@
+{
+  "vhosts": [{ "name": "/" }],
+  "exchanges": [
+    { "name": "question-generation.direct", "vhost": "/", "type": "direct", "durable": true, "auto_delete": false, "internal": false, "arguments": {} },
+    { "name": "question-generation.dlx", "vhost": "/", "type": "direct", "durable": true, "auto_delete": false, "internal": false, "arguments": {} }
+  ],
+  "queues": [
+    { "name": "agent-question-generation-task-queue", "vhost": "/", "durable": true, "auto_delete": false,
+      "arguments": { "x-dead-letter-exchange": "question-generation.dlx", "x-dead-letter-routing-key": "agent-question-generation-task-dlq" } },
+    { "name": "agent-question-generation-task-dlq", "vhost": "/", "durable": true, "auto_delete": false, "arguments": {} },
+    { "name": "agent-question-generation-results-queue", "vhost": "/", "durable": true, "auto_delete": false,
+      "arguments": { "x-dead-letter-exchange": "question-generation.dlx", "x-dead-letter-routing-key": "agent-question-generation-results-dlq" } },
+    { "name": "agent-question-generation-results-dlq", "vhost": "/", "durable": true, "auto_delete": false, "arguments": {} },
+    { "name": "ingestion.commands", "vhost": "/", "durable": true, "auto_delete": false,
+      "arguments": { "x-dead-letter-exchange": "", "x-dead-letter-routing-key": "ingestion.commands.dlq" } },
+    { "name": "ingestion.commands.dlq", "vhost": "/", "durable": true, "auto_delete": false, "arguments": {} },
+    { "name": "job.status.events", "vhost": "/", "durable": true, "auto_delete": false,
+      "arguments": { "x-dead-letter-exchange": "", "x-dead-letter-routing-key": "job.status.events.dlq" } },
+    { "name": "job.status.events.dlq", "vhost": "/", "durable": true, "auto_delete": false, "arguments": {} },
+    { "name": "ingestion.results", "vhost": "/", "durable": true, "auto_delete": false,
+      "arguments": { "x-dead-letter-exchange": "", "x-dead-letter-routing-key": "ingestion.results.dlq" } },
+    { "name": "ingestion.results.dlq", "vhost": "/", "durable": true, "auto_delete": false, "arguments": {} }
+  ],
+  "bindings": [
+    { "source": "question-generation.direct", "vhost": "/", "destination": "agent-question-generation-task-queue", "destination_type": "queue", "routing_key": "generation.task", "arguments": {} },
+    { "source": "question-generation.direct", "vhost": "/", "destination": "agent-question-generation-results-queue", "destination_type": "queue", "routing_key": "generation.result", "arguments": {} },
+    { "source": "question-generation.dlx", "vhost": "/", "destination": "agent-question-generation-task-dlq", "destination_type": "queue", "routing_key": "agent-question-generation-task-dlq", "arguments": {} },
+    { "source": "question-generation.dlx", "vhost": "/", "destination": "agent-question-generation-results-dlq", "destination_type": "queue", "routing_key": "agent-question-generation-results-dlq", "arguments": {} }
+  ]
+}

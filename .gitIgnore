@@ -1,0 +1,73 @@
+# ==========================================
+# NODE.JS SERVICES (Nest-Backend, React-front-end, Rabbitmq)
+# ==========================================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# NestJS build output
+Nest-Backend/dist/
+
+# React / Vite build output
+React-front-end/dist/
+React-front-end/build/
+*.local
+
+# ==========================================
+# PYTHON SERVICES (Django-Backend, RAG-pipeline)
+# ==========================================
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Django
+*.sqlite3
+media/
+staticfiles/
+
+# ==========================================
+# ENVIRONMENT FILES (one .env per service)
+# ==========================================
+.env
+.env.*
+!.env.example
+Nest-Backend/.env*
+Django-Backend/.env*
+RAG-pipeline/.env*
+React-front-end/.env*
+Rabbitmq/.env*
+
+# ==========================================
+# LOCAL INFRASTRUCTURE DATA
+# ==========================================
+pg_data/
+qdrant_data/
+data/
+
+# ==========================================
+# LOGS AND OS FILES
+# ==========================================
+*.log
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ==========================================
+# EDITOR SETTINGS
+# ==========================================
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+.idea/
+
+
+CLAUDE.md
