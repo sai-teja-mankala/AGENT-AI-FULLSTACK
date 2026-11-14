@@ -1,19 +1,37 @@
 """
-LLM client utilities for Claude (Anthropic), via Anthropic's OpenAI-compatible
-chat completions endpoint.
+LLM client utilities. Both providers use the OpenAI-compatible chat completions API.
 
-Requires ANTHROPIC_API_KEY. Model names come from GENERATOR_MODEL / JUDGE_MODEL.
+LLM_PROVIDER selects the provider:
+- "anthropic" (default): needs ANTHROPIC_API_KEY
+- "deepinfra":           needs DEEPINFRA_API_KEY (serves Qwen models)
+
+Model names come from GENERATOR_MODEL / JUDGE_MODEL.
 """
 
+import logging
 import os
 import threading
 
 from openai import OpenAI
 
-ANTHROPIC_BASE_URL = "https://api.anthropic.com/v1/"
+logger = logging.getLogger(__name__)
+
+# provider -> (API key env var, OpenAI-compatible base URL)
+PROVIDERS = {
+    "anthropic": ("ANTHROPIC_API_KEY", "https://api.anthropic.com/v1/"),
+    "deepinfra": ("DEEPINFRA_API_KEY", "https://api.deepinfra.com/v1/openai"),
+}
 
 _client = None
 _client_lock = threading.Lock()
+
+
+def get_provider() -> str:
+    """Return the configured provider name, validated against PROVIDERS."""
+    name = os.getenv("LLM_PROVIDER", "anthropic").strip().lower() or os.getenv("LLM_PROVIDER", "deepinfra").strip().lower()
+    if name not in PROVIDERS:
+        raise RuntimeError(f"LLM_PROVIDER must be one of {sorted(PROVIDERS)}, got {name!r}")
+    return name
 
 
 def get_client():
@@ -22,10 +40,13 @@ def get_client():
     if _client is None:
         with _client_lock:
             if _client is None:
-                api_key = os.getenv("ANTHROPIC_API_KEY")
+                provider = get_provider()
+                key_var, base_url = PROVIDERS[provider]
+                api_key = os.getenv(key_var)
                 if not api_key:
-                    raise RuntimeError("ANTHROPIC_API_KEY is not set")
-                _client = OpenAI(api_key=api_key, base_url=ANTHROPIC_BASE_URL)
+                    raise RuntimeError(f"{key_var} is not set (LLM_PROVIDER={provider})")
+                logger.info("LLM client ready | provider=%s | base_url=%s", provider, base_url)
+                _client = OpenAI(api_key=api_key, base_url=base_url)
     return _client
 
 
