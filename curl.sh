@@ -1,0 +1,10 @@
+curl -X POST http://localhost:8000/api/generate/   -H "Content-Type: application/json"   -d '{
+    "learningObjectives": [
+      {"uuid": "lo-1", "text": "Explain how photosynthesis converts light energy into chemical energy"}
+    ],
+    "questionTypes": ["MULTIPLE_CHOICE"],
+    "difficultyLevels": ["Beginner"],
+    "numberOfQuestions": 1,
+    "locale": "en-US",
+    "sourceText": "Photosynthesis is the process by which plants use sunlight, water and carbon dioxide to produce glucose and oxygen. It occurs in chloroplasts, where chlorophyll absorbs light energy."
+  }'
