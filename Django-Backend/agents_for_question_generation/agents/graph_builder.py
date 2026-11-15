@@ -109,7 +109,19 @@ def _compile_question_generation_graph():
 
     logger.info("GRAPH: Compiling LangGraph pipeline (first time only)")
     graph = StateGraph[GraphState, None, GraphState, GraphState](GraphState)
-    
+
+    # ARIZE-PHOENIX-NODE-SPAN: wrap each node in a Phoenix span (no-op passthrough if tracing fails).
+    # Per-node metadata lives in tracing/node_specs.py
+    from ..tracing.node_specs import NODE_SPECS
+    from ..tracing.spans import traced_node
+    _add_node = graph.add_node
+
+    def add_node(name, fn):
+        spec = NODE_SPECS.get(name)
+        _add_node(name, traced_node(name, spec)(fn) if spec else fn)
+
+    graph.add_node = add_node
+
     # Add a dummy start node for conditional routing
     def start_routing(state: GraphState) -> GraphState:
         """Entry point that simply passes through the state for routing."""

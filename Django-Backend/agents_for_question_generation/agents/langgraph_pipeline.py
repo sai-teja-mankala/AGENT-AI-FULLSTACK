@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 import random
 import time
 import uuid
@@ -4514,9 +4515,44 @@ def output_guardrail(state: GraphState) -> GraphState:
 
 
 def run_pipeline(payload: PipelineInput) -> List[Dict[str, Any]]:
+    """Traced entry point: root Phoenix span + optional post-run evaluators.
+
+    Tracing/evaluator failures never affect the generation result.
+    """
+    # ARIZE-PHOENIX-INIT: register Phoenix tracing once per process (idempotent)
+    from ..tracing import init_tracing, pipeline_span
+    init_tracing()
+    research = payload.get("research", {}) or {}
+    model_cfg = {
+        "generator_model": research.get("generationModel") or os.getenv("GENERATOR_MODEL"),
+        "judge_model": research.get("validationModel") or os.getenv("JUDGE_MODEL"),
+        "llm_provider": os.getenv("LLM_PROVIDER"),
+        "structured_output": USE_STRUCTURED_OUTPUT,
+    }
+    # ARIZE-PHOENIX-PIPELINE-SPAN: root span - everything below (graph nodes, LLM calls, evaluators) nests under it
+    with pipeline_span(payload, model_cfg) as finish:
+        output = _run_pipeline_impl(payload)
+        finish(output)  # ARIZE-PHOENIX-PIPELINE-SPAN: records final output on the root span
+        # ARIZE-PHOENIX-EVALUATOR: optional post-run evaluators (env EVALUATORS_ENABLED); never affects the result
+        try:
+            from ..evaluators import run_evaluators, get_enabled
+            if get_enabled():
+                run_evaluators(output, {
+                    "payload": payload,
+                    "pipeline_config": _create_pipeline_config(research),
+                    "container_id": payload.get("assessment_container_id"),
+                    "job_id": payload.get("task_id"),
+                    "assessment_id": payload.get("assessment_container_id"),
+                })
+        except Exception:
+            logger.exception("EVAL: evaluator run failed (ignored)")
+        return output
+
+
+def _run_pipeline_impl(payload: PipelineInput) -> List[Dict[str, Any]]:
     """
     Execute the complete question generation pipeline using state-based configuration.
-    
+
     Returns database format directly - ready for store_agent_questions().
     """
     # Reset token tracker for new pipeline run
