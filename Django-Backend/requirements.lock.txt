@@ -1,6 +1,7 @@
 amqp==5.4.2
 annotated-types==0.8.0
 anyio==4.16.0
+arize-phoenix-client==3.7.0
 arize-phoenix-evals==3.10.0
 arize-phoenix-otel==0.17.3
 asgiref==3.13.0
