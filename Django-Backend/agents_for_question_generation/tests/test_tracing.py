@@ -140,3 +140,69 @@ class EvaluatorTests(TestCase):
             self.assertEqual(get_enabled(), [])
         with patch.dict("os.environ", {"EVALUATORS_ENABLED": "structure"}):
             self.assertEqual([e.name for e in get_enabled()], ["structure"])
+        # Regression: "true" must enable every registered evaluator (not silently none)
+        with patch.dict("os.environ", {"EVALUATORS_ENABLED": "true"}):
+            self.assertEqual({e.name for e in get_enabled()}, {"structure", "all_checks", "quality_relevancy"})
+        # Regression: a malformed value (e.g. "EVALUATORS_ENABLED=structure" pasted into the value) must warn, not pass silently
+        with patch.dict("os.environ", {"EVALUATORS_ENABLED": "EVALUATORS_ENABLED=structure,all_checks"}):
+            with self.assertLogs("agents_for_question_generation.evaluators.registry", level="WARNING") as logs:
+                self.assertEqual([e.name for e in get_enabled()], ["all_checks"])
+            self.assertIn("evaluators_enabled=structure", logs.output[0])  # value is lowercased before parsing
+
+
+# ARIZE-PHOENIX-EVALUATOR tests: judge LLM calls are stubbed with fixed outcomes
+from agents_for_question_generation.evaluators import judges  # noqa: E402
+from agents_for_question_generation.evaluators.builtin import AllChecksEvaluator  # noqa: E402
+from agents_for_question_generation.evaluators.generation import with_generation_evaluators  # noqa: E402
+
+
+def _stub_tasks(*specs):
+    return [lambda n=n, p=p: judges.CheckOutcome(n, 70.0, 80, p, "r", 1, 2) for n, p in specs]
+
+
+class JudgeEvaluatorTests(TestCase):
+    def setUp(self):
+        _exporter.clear()
+
+    def test_all_checks_reports_each_check_and_aggregate(self):
+        out = [{"LearningObjective": "lo", "LevelOfQuiz": "Beginner", "questions": [
+            {"questionText": "Q?", "answer": [{"answerText": "a", "isCorrect": True}]}]}]
+        with patch.object(judges, "stem_check_tasks", return_value=_stub_tasks(("stem_clarity_bias", True))), \
+                patch.object(judges, "distractor_check_tasks", return_value=_stub_tasks(("clarity_check", False))):
+            res = AllChecksEvaluator().evaluate(out, {"payload": {}})
+        self.assertFalse(res.passed)
+        self.assertEqual(res.score, 0.5)
+        self.assertIn("clarity_check", res.reason)
+        s = _spans()
+        self.assertEqual(s["evaluator.all_checks.clarity_check"].attributes["validation_status"], "fail")
+        self.assertEqual(s["evaluator.all_checks.stem_clarity_bias"].attributes["evaluation_stage"], "final_output")
+
+    def test_all_checks_skips_matching_shape(self):
+        res = AllChecksEvaluator().evaluate([{"questions": [{"pairs": []}]}], {})
+        self.assertFalse(res.passed)
+        self.assertEqual(res.metadata["checks"], [])
+
+    def test_generation_evaluator_runs_only_when_enabled_and_keeps_output(self):
+        state = {"questions": [{"questionText": "Q?", "payload": {}}], "task_id": "j"}
+        node = with_generation_evaluators("build_question", lambda s: s)
+        with patch.object(judges, "stem_check_tasks", return_value=_stub_tasks(("stem_clarity_bias", True))) as t:
+            with patch.dict("os.environ", {"GENERATION_EVALUATORS_ENABLED": "false"}):
+                self.assertIs(node(state), state)
+            t.assert_not_called()
+            with patch.dict("os.environ", {"GENERATION_EVALUATORS_ENABLED": "true"}):
+                self.assertIs(node(state), state)
+            t.assert_called_once()
+        a = _spans()["generation_eval.stem_clarity_bias"].attributes
+        self.assertEqual(a["evaluation_stage"], "generation:build_question")
+        self.assertEqual(a["job_id"], "j")
+
+    def test_generation_evaluator_failure_never_breaks_node(self):
+        node = with_generation_evaluators("build_options", lambda s: s)
+        state = {"raw_outputs": [{"payload": {}, "result": {"questions": [{"x": 1}]}}]}
+        with patch.object(judges, "distractor_check_tasks", side_effect=RuntimeError("boom")), \
+                patch.dict("os.environ", {"GENERATION_EVALUATORS_ENABLED": "true"}):
+            self.assertIs(node(state), state)
+
+    def test_non_generation_node_not_wrapped(self):
+        fn = lambda s: s
+        self.assertIs(with_generation_evaluators("validate_quality", fn), fn)

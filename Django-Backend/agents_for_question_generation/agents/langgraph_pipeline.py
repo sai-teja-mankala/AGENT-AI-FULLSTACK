@@ -4682,7 +4682,14 @@ def _run_pipeline_impl(payload: PipelineInput) -> List[Dict[str, Any]]:
     pipeline_errors = final_state.get("pipeline_errors", [])
     if pipeline_errors and output:
         output[0]["pipeline_errors"] = pipeline_errors
-    
+    # ARIZE-PHOENIX-EXPERIMENT-STATS: regeneration attempt counts for offline experiments (read by run_experiment only)
+    if output:
+        output[0]["pipeline_stats"] = {
+            "stem_validation_attempts": final_state.get("stem_validation_attempt", 0),
+            "stem_lo_cog_validation_attempts": final_state.get("stem_lo_cog_validation_attempt", 0),
+            "pipeline_errors": list(pipeline_errors),
+        }
+
     # Log completion with LO and question type context
     if learning_objectives:
         first_lo = learning_objectives[0]

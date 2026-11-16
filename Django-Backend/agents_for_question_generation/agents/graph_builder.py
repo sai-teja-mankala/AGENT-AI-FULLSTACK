@@ -116,9 +116,13 @@ def _compile_question_generation_graph():
     from ..tracing.spans import traced_node
     _add_node = graph.add_node
 
+    # ARIZE-PHOENIX-GENERATION-EVALUATOR: optional LLM-judge after generation nodes (env GENERATION_EVALUATORS_ENABLED)
+    from ..evaluators.generation import with_generation_evaluators
+
     def add_node(name, fn):
         spec = NODE_SPECS.get(name)
-        _add_node(name, traced_node(name, spec)(fn) if spec else fn)
+        wrapped = traced_node(name, spec)(fn) if spec else fn
+        _add_node(name, with_generation_evaluators(name, wrapped))
 
     graph.add_node = add_node
 

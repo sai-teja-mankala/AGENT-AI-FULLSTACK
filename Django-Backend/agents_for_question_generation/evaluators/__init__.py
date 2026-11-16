@@ -1,6 +1,6 @@
 """Reusable, node-independent evaluators run over the finished pipeline output.
 
-Enable with env EVALUATORS_ENABLED=structure,quality_relevancy (default: none).
+Enable with env EVALUATORS_ENABLED=structure,all_checks,quality_relevancy, or =true/all for every evaluator (default: none).
 Add an evaluator: subclass/implement `Evaluator` and call `register(...)`.
 """
 from dataclasses import dataclass, field

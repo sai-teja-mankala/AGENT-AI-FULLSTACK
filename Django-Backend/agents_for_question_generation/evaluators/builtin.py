@@ -67,5 +67,38 @@ class QualityRelevancyEvaluator:
                           metadata={"quality_threshold": q_thr, "relevancy_threshold": r_thr})
 
 
+# ARIZE-PHOENIX-EVALUATOR: "all_checks" - runs EVERY validation prompt (2 stem + 7 distractor checks) against each
+# FINAL question/answer set and reports which pass or fail. One span per check + one summary span.
+class AllChecksEvaluator:
+    name = "all_checks"
+
+    def evaluate(self, output, context) -> EvalResult:
+        from . import judges
+        cfg, cid = context.get("pipeline_config"), context.get("container_id")
+        extra = {"evaluation_stage": "final_output", "job_id": context.get("job_id"),
+                 "assessment_id": context.get("assessment_id")}
+        outcomes = []
+        for lo in output or []:
+            for q in _questions([lo]):
+                if "answer" not in q:  # MATCHING: these prompts do not apply
+                    continue
+                tasks = judges.stem_check_tasks(
+                    q.get("questionType", "MULTIPLE_CHOICE"), lo.get("LevelOfQuiz", ""),
+                    lo.get("LearningObjective", ""), q.get("questionText", ""), cfg, cid)
+                tasks += judges.distractor_check_tasks(q, context.get("payload") or {}, cfg, cid)
+                results = judges.run_parallel(tasks)
+                judges.emit_outcomes(results, "evaluator.all_checks", extra)
+                outcomes.extend(results)
+        failed = [o for o in outcomes if not o.passed]
+        passed = bool(outcomes) and not failed
+        ratio = (len(outcomes) - len(failed)) / len(outcomes) if outcomes else None
+        reason = ("all %d checks passed" % len(outcomes)) if passed else (
+            "; ".join(f"{o.name}: {o.reason or 'failed'}" for o in failed) or "no questions")
+        return EvalResult(self.name, ratio, passed, reason, threshold=1.0, metadata={
+            "checks": [{"name": o.name, "score": o.score, "threshold": o.threshold, "passed": o.passed}
+                       for o in outcomes]})
+
+
 register(StructureEvaluator())
+register(AllChecksEvaluator())
 register(QualityRelevancyEvaluator())
