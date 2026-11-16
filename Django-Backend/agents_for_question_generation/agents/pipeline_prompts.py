@@ -370,6 +370,42 @@ Quality pass threshold: {quality_threshold}
 Relevancy pass threshold: {relevancy_threshold}
 """
 
+# OLD-VS-NEW COMPARISON (offline experiments only, used by evaluators/comparison.py).
+# Compares the reference output with the new output for the same input. Rubric scores are
+# computed separately with the quality/relevancy prompt above; this prompt only picks a winner.
+SYSTEM_PROMPT_TEMPLATE_OLD_VS_NEW_COMPARISON = """
+You are a strict assessment evaluator comparing two versions of the same assessment output.
+Both versions were generated from the same input. OLD is the reference version. NEW is the candidate version.
+
+Decide which version better meets the quality rubric and the learning objectives.
+Judge only against the rubric, the learning objectives and the original input. Do not prefer a version just because it is longer.
+
+Return ONLY JSON:
+{{
+  "winner": "old" | "new" | "tie",
+  "reason": "one or two sentences naming the decisive difference"
+}}
+"""
+
+USER_PROMPT_TEMPLATE_OLD_VS_NEW_COMPARISON = """
+Quality Rubric:
+{rubric}
+
+Learning Objectives:
+{learning_objectives}
+
+Target locale: {locale}
+
+Original input:
+{original_input}
+
+OLD output (reference):
+{old_output}
+
+NEW output (candidate):
+{new_output}
+"""
+
 # ==========================================
 # MATCHING ("match the following") PROMPTS
 # ==========================================
@@ -769,18 +805,6 @@ STRICTLY return JSON only, in this format:
 Pass threshold: {locale_threshold}%
 """
 
-
-SIMPLE_FORMAT_CORRECTION_PROMPT = """
-Convert the following malformed LLM response into the expected JSON format, preserving all original content.
-
-MALFORMED RESPONSE:
-{malformed_response}
-
-EXPECTED FORMAT:
-{expected_format}
-
-Return ONLY the corrected JSON. No explanations, reasoning, additional content or markdown.
-"""
 
 DISTRACTOR_BATCH_CORRECTION_SYSTEM_PROMPT = """
 You are an expert assessment designer. Create high-quality distractors and respond in the format given in the user prompt.

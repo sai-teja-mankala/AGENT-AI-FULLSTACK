@@ -47,7 +47,6 @@ from .pipeline_prompts import (
     DISTRACTOR_BATCH_CORRECTION_SYSTEM_PROMPT,
     DISTRACTOR_BATCH_CORRECTION_USER_PROMPT,
     VALIDATION_SYSTEM_MESSAGE,
-    SIMPLE_FORMAT_CORRECTION_PROMPT,
     STEM_CLARITY_BIAS_SYSTEM_PROMPT,
     STEM_CLARITY_BIAS_USER_PROMPT,
     MATCHING_SYSTEM_CONTRACT,
@@ -77,7 +76,6 @@ from .pipeline_constants import (
     STEM_LO_COG_VALIDATION_KEYS,
     VALIDATION_AGENT_KEYS,
     DISTRACTOR_VALIDATION_KEYS,
-    QUALITY_VALIDATION_KEYS,
     FINAL_PIPELINE_KEYS,
     MATCHING_PIPELINE_KEYS,
     MAX_MATCHING_QUALITY_CORRECTION_ATTEMPTS,
@@ -98,7 +96,6 @@ from ..utils.response_schemas import (
     QuestionGenerationResponse,
     OptionsGenerationResponse,
     ValidationResponse,
-    get_response_schema
 )
 
 logger = logging.getLogger(__name__)
@@ -412,34 +409,6 @@ def _parse_json_raw(content: str, container_id: str = None) -> Any:
         _log_with_container("warning", f"Raw JSON parsing failed. Content: {content[:200]}...", container_id=container_id)
         _log_with_container("warning", f"Cleaned: {_extract_json_text(content)[:200]}...", container_id=container_id)
         raise
-
-
-def _simple_format_fix(llm_response: str, expected_format: str, pipeline_config: PipelineConfig = None, container_id: str = None) -> Optional[str]:
-    """Simple format correction - makes one call to fix malformed JSON."""
-    if pipeline_config is None:
-        raise ValueError("pipeline_config is required")
-        
-    try:
-        correction_prompt = SIMPLE_FORMAT_CORRECTION_PROMPT.format(
-            malformed_response=llm_response,
-            expected_format=expected_format
-        )
-        
-        response = _call_llm(
-            messages=[
-                {"role": "system", "content": "Fix JSON format issues while preserving all content."},
-                {"role": "user", "content": correction_prompt},
-            ],
-            task_type="format_fix",
-            pipeline_config=pipeline_config,
-            container_id=container_id
-        )
-        
-        return response.choices[0].message.content or ""
-        
-    except Exception as e:
-        _log_with_container("error", f"Simple format fix failed: {str(e)}", container_id=container_id)
-        return None
 
 
 def _call_llm_for_validation(
@@ -3462,12 +3431,6 @@ def _route_after_distractor_validation(state: GraphState) -> str:
     return "correct"
 
 
-def _is_valid_format(result: Any, question_type: str) -> bool:
-    """Backward compatibility wrapper for the new validation function."""
-    is_valid, _ = _is_valid_response_format(result, question_type)
-    return is_valid
-
-
 def evaluate_quality(result: Any, rubric: str, threshold: int, locale: str = 'en-US', pipeline_config: PipelineConfig = None, container_id: str = None) -> Dict[str, Any]:
     """
     Evaluate quality of generated content using LLM with improved JSON parsing.
@@ -4514,38 +4477,51 @@ def output_guardrail(state: GraphState) -> GraphState:
     return state
 
 
-def run_pipeline(payload: PipelineInput) -> List[Dict[str, Any]]:
+def run_pipeline(payload: PipelineInput, evaluate: bool = True) -> List[Dict[str, Any]]:
     """Traced entry point: root Phoenix span + optional post-run evaluators.
 
+    evaluate=False skips the post-run evaluators (used by offline experiments).
     Tracing/evaluator failures never affect the generation result.
+
+    NORMAL GENERATION FLOW (search for "normal-generation-<n>" to follow it):
+      normal-generation-1  register Phoenix tracing (once per process)
+      normal-generation-2  read the model settings for the trace
+      normal-generation-3  open the root span
+      normal-generation-4  run the core pipeline (_run_pipeline_impl, steps 8-15 below)
+      normal-generation-5  record the final output on the root span
+      normal-generation-6  optional post-run evaluators (EVALUATORS_ENABLED)
+      normal-generation-7  return the output (evaluators never change it)
     """
-    # ARIZE-PHOENIX-INIT: register Phoenix tracing once per process (idempotent)
+    # normal-generation-1: register Phoenix tracing once per process (idempotent)
     from ..tracing import init_tracing, pipeline_span
     init_tracing()
     research = payload.get("research", {}) or {}
+    # normal-generation-2: model settings recorded on the root span
     model_cfg = {
         "generator_model": research.get("generationModel") or os.getenv("GENERATOR_MODEL"),
         "judge_model": research.get("validationModel") or os.getenv("JUDGE_MODEL"),
         "llm_provider": os.getenv("LLM_PROVIDER"),
         "structured_output": USE_STRUCTURED_OUTPUT,
     }
-    # ARIZE-PHOENIX-PIPELINE-SPAN: root span - everything below (graph nodes, LLM calls, evaluators) nests under it
+    # normal-generation-3: root span - everything below (graph nodes, LLM calls, evaluators) nests under it
     with pipeline_span(payload, model_cfg) as finish:
-        output = _run_pipeline_impl(payload)
-        finish(output)  # ARIZE-PHOENIX-PIPELINE-SPAN: records final output on the root span
-        # ARIZE-PHOENIX-EVALUATOR: optional post-run evaluators (env EVALUATORS_ENABLED); never affects the result
-        try:
-            from ..evaluators import run_evaluators, get_enabled
-            if get_enabled():
-                run_evaluators(output, {
-                    "payload": payload,
-                    "pipeline_config": _create_pipeline_config(research),
-                    "container_id": payload.get("assessment_container_id"),
-                    "job_id": payload.get("task_id"),
-                    "assessment_id": payload.get("assessment_container_id"),
-                })
-        except Exception:
-            logger.exception("EVAL: evaluator run failed (ignored)")
+        output = _run_pipeline_impl(payload)                              # normal-generation-4
+        finish(output)                                                    # normal-generation-5
+        # normal-generation-6: optional post-run evaluators (env EVALUATORS_ENABLED); never affects the result.
+        # Offline experiments pass evaluate=False because they score the output themselves.
+        if evaluate:
+            try:
+                from ..evaluators import run_evaluators, get_enabled
+                if get_enabled():
+                    run_evaluators(output, {
+                        "payload": payload,
+                        "pipeline_config": _create_pipeline_config(research),
+                        "container_id": payload.get("assessment_container_id"),
+                        "job_id": payload.get("task_id"),
+                        "assessment_id": payload.get("assessment_container_id"),
+                    })
+            except Exception:
+                logger.exception("EVAL: evaluator run failed (ignored)")
         return output
 
 
@@ -4555,7 +4531,7 @@ def _run_pipeline_impl(payload: PipelineInput) -> List[Dict[str, Any]]:
 
     Returns database format directly - ready for store_agent_questions().
     """
-    # Reset token tracker for new pipeline run
+    # normal-generation-8: reset the token tracker for this run
     reset_token_tracker()
     
     # Set up container ID and task ID for structured logging
@@ -4600,6 +4576,7 @@ def _run_pipeline_impl(payload: PipelineInput) -> List[Dict[str, Any]]:
         _log_with_container("error", f"No difficulty levels provided! Payload: {payload}", container_id=container_id)
         raise ValueError("No difficulty levels provided to agent")
 
+    # normal-generation-9: build the initial graph state from the payload
     base_state = {
         "input": payload,
         "container_id": container_id,
@@ -4615,6 +4592,7 @@ def _run_pipeline_impl(payload: PipelineInput) -> List[Dict[str, Any]]:
         "pipeline_errors": [],
     }
 
+    # normal-generation-10: choose the config builder (MATCHING or multiple choice)
     # MATCHING is built by its own config builder and routed by graph_builder
     # to the fully separate MATCHING chain (see _route_from_start). Per the
     # existing calling convention, each run_pipeline() call is scoped to a
@@ -4628,6 +4606,7 @@ def _run_pipeline_impl(payload: PipelineInput) -> List[Dict[str, Any]]:
     from .graph_builder import build_question_generation_graph
     from .cancellation import is_job_cancelled
 
+    # normal-generation-11: run the graph (generate, validate, regenerate, check options) and stop if the job is cancelled
     app = build_question_generation_graph()
     final_state = config_state
     for step_state in app.stream(config_state, stream_mode="values"):
@@ -4636,6 +4615,7 @@ def _run_pipeline_impl(payload: PipelineInput) -> List[Dict[str, Any]]:
             _log_with_container("info", "Job cancelled - aborting pipeline mid-run", container_id=container_id)
             raise PipelineCancelled(f"Job {task_id} cancelled")
     
+    # normal-generation-12: format correction (skipped when structured output is on)
     # Skip format correction when using structured output - guaranteed compliance
     if not USE_STRUCTURED_OUTPUT:
         retry = 0
@@ -4649,11 +4629,13 @@ def _run_pipeline_impl(payload: PipelineInput) -> List[Dict[str, Any]]:
     else:
         _log_with_container("info", "Skipping format correction - structured output enabled", container_id=container_id)
 
+    # normal-generation-13: build the database-shaped output from the improved outputs
     output = _build_output(payload, final_state.get("improved_outputs", []), container_id=container_id)
     
     total_questions = sum(len(lo.get("questions", [])) for lo in output)
     total_los = len(output)
     
+    # normal-generation-14: compare the delivered question count with what was expected
     # Calculate original expectations using the same logic as config creation
     learning_objectives_raw = payload.get("learningObjectives", [])
     learning_objectives_processed = _learning_objective_descriptions(payload)
@@ -4678,6 +4660,7 @@ def _run_pipeline_impl(payload: PipelineInput) -> List[Dict[str, Any]]:
     else:
         _log_with_container("info", f"✓ Expected question count achieved: {total_questions}/{expected_total_questions}", container_id=container_id)
     
+    # normal-generation-15: attach pipeline errors and stats to the output, then clean up state and return
     # Attach pipeline errors to output for job logging
     pipeline_errors = final_state.get("pipeline_errors", [])
     if pipeline_errors and output:

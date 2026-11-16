@@ -95,9 +95,6 @@ VALIDATION_AGENT_KEYS = [
 # Distractor validation state (cleared after finalization)
 DISTRACTOR_VALIDATION_KEYS = ["validated_outputs", "distractor_corrections_output", "passed_questions_final"]
 
-# Quality validation state (cleared after processing)
-QUALITY_VALIDATION_KEYS = ["quality_validation_passed", "quality_validation_failed"]
-
 # MATCHING ("match the following") pipeline state - fully separate from the MCQ
 # keys above so the two flows can never read/write each other's state.
 # Note: final passed results are written directly to the shared
